@@ -1,0 +1,119 @@
+# import libraries
+try:
+  # %tensorflow_version only exists in Colab.
+  !pip install tf-nightly
+except Exception:
+  pass
+import tensorflow as tf
+import pandas as pd
+from tensorflow import keras
+!pip install tensorflow-datasets
+import tensorflow_datasets as tfds
+import numpy as np
+import matplotlib.pyplot as plt
+
+print(tf.__version__)
+
+# get data files
+!wget https://cdn.freecodecamp.org/project-data/sms/train-data.tsv
+!wget https://cdn.freecodecamp.org/project-data/sms/valid-data.tsv
+
+train_file_path = "train-data.tsv"
+test_file_path = "valid-data.tsv"
+
+train_dataset = pd.read_csv('train-data.tsv',sep='\t',header=None,names=['class', 'text'],encoding='utf-8')
+valid_dataset = pd.read_csv('valid-data.tsv',sep='\t',header=None,names=['class', 'text'],encoding='utf-8')
+
+VOCAB_SIZE = 88584
+BATCH_SIZE = 64
+
+def preprocess(df):
+    data = df.copy()
+    data.loc[data['class'] == 'ham','class'] = 0
+    data.loc[data['class'] == 'spam','class'] = 1
+    labels = data.pop('class').astype(np.float32)
+    new_data = []
+    for i in data['text']:
+      new_data.append(i)
+    return new_data, labels
+
+train_data, train_labels = preprocess(train_dataset)
+valid_data, valid_labels = preprocess(valid_dataset)
+
+MAXLEN_train = max(train_data, key=len)
+MAXLEN_valid = max(valid_data, key=len)
+MAXLEN = max(len(MAXLEN_train.strip()), len(MAXLEN_valid.strip()))
+
+dataset = tf.keras.datasets.imdb
+
+from keras.preprocessing.sequence import pad_sequences
+
+word_index = dataset.get_word_index()
+
+def encode_text(text):
+  tokens = keras.preprocessing.text.text_to_word_sequence(text)
+  tokens = [word_index[word] if word in word_index else 0 for word in tokens]
+  return pad_sequences([tokens], MAXLEN)[0]
+
+def prep_to_mod(data_for_prep):
+    new_data = []
+    for i in data_for_prep:
+        new_data.append(encode_text(i))
+    return np.array(new_data)
+new_train_data = prep_to_mod(train_data)
+new_valid_data = prep_to_mod(valid_data)
+
+model = tf.keras.Sequential([
+    tf.keras.layers.Embedding(VOCAB_SIZE, 32),
+    tf.keras.layers.LSTM(32),
+    tf.keras.layers.Dense(1, activation="sigmoid")
+])
+
+model.compile(loss="binary_crossentropy",optimizer="rmsprop",metrics=['acc'])
+
+model.fit(new_train_data, train_labels, epochs=5, validation_split = 0.2)
+
+results = model.evaluate(new_valid_data, valid_labels)
+
+def predict_message(pred_text):
+    encoded_text = encode_text(pred_text)
+    pred = np.zeros((1, MAXLEN))
+    pred[0] = encoded_text
+    result = model.predict(pred).flatten()[0]
+    label = ""
+    if result > 0.5:
+        label = "spam"
+    else:
+        label = "ham"
+    prediction = [result, label]
+    return (prediction)
+
+pred_text = "how are you doing today?"
+
+prediction = predict_message(pred_text)
+print(prediction)
+
+def test_predictions():
+    test_messages = ["how are you doing today",
+                     "sale today! to stop texts call 98912460324",
+                     "i dont want to go. can we try it a different day? available sat",
+                     "our new mobile video service is live. just install on your phone to start watching.",
+                     "you have won £1000 cash! call to claim your prize.",
+                     "i'll bring it tomorrow. don't forget the milk.",
+                     "wow, is your arm alright. that happened to me one time too"
+                    ]
+
+    test_answers = ["ham", "spam", "ham", "spam", "spam", "ham", "ham"]
+    passed = True
+
+    for msg, ans in zip(test_messages, test_answers):
+        prediction = predict_message(msg)
+        if prediction[1] != ans:
+            passed = False
+
+    if passed:
+        print("You passed the challenge. Great job!")
+    else:
+        print("You haven't passed yet. Keep trying.")
+
+test_predictions()
